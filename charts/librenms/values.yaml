@@ -15,8 +15,7 @@ librenms:
     tag: 25.11.0
 
   # -- Optional user-supplied APP_KEY. If empty, Helm auto-generates a random key on first install
-  # and persists it in a Kubernetes Secret for reuse on upgrades. This replaces the broken
-  # Docker auto-generation behavior and ensures cluster-safe, deterministic APP_KEY management.
+  # and persists it in a Kubernetes Secret for reuse on upgrades.
   # Format: base64:BASE64_ENCODED_32_BYTES (generate with: php artisan key:generate --show)
   appkey: ""
 
