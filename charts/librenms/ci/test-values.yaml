@@ -1,4 +1,8 @@
 librenms:
+  # Test with explicit APP_KEY to verify user-provided values work
+  appkey: "base64:dGVzdGtleWZvcmNpdGVzdGluZ3B1cnBvc2Vz"
+  # Test with custom secret name to ensure override works
+  appkeySecretName: "test-custom-appkey-secret"
   extraEnvs:
     - name: GLOBAL_DEBUG
       value: "true"
