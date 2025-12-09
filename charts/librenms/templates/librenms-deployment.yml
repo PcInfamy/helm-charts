@@ -60,13 +60,11 @@ spec:
             secretKeyRef:
               name: {{ .Release.Name }}-mysql
               key: mysql-password
-        {{- if or .Values.librenms.appkey .Values.librenms.existingSecret }}
         - name: APP_KEY
           valueFrom:
             secretKeyRef:
-              name: {{ include "librenms.secretName" . }}
+              name: {{ include "librenms.appkeySecretNameOrExisting" . }}
               key: appkey
-        {{- end }}
         {{- with .Values.librenms.extraEnvs }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
