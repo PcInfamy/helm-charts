@@ -45,22 +45,93 @@ jobs:
           sudo chmod +x /usr/local/bin/yq
           yq --version
 
-      - name: Bump charts/librenms/Chart.yaml version
+      - name: Extract and cut changelog for release
         if: steps.semver.outputs.changed == 'true'
+        id: changelog
         run: |
-          yq -i '.version = "${{ steps.semver.outputs.version }}"' charts/librenms/Chart.yaml
+          VERSION="${{ steps.semver.outputs.version }}"
+          RELEASE_DATE=$(date +%Y-%m-%d)
+          
+          if [ -f "CHANGELOG.md" ]; then
+            echo "Cutting changelog for version $VERSION..."
+            
+            # Create a temporary file
+            TEMP_FILE=$(mktemp)
+            
+            # Extract the [Unreleased] section content
+            UNRELEASED_CONTENT=$(awk '/^## \[Unreleased\]/,/^## \[/' CHANGELOG.md | sed '1d;$d')
+            
+            # Build new changelog with cut version and reset [Unreleased]
+            cat > "$TEMP_FILE" << 'TEMPLATE'
+          # Changelog
 
-      - name: Commit chart version bump
-        if: steps.semver.outputs.changed == 'true'
-        run: |
-          git add charts/librenms/Chart.yaml
-          git diff --cached --quiet || git commit -m "chore(chart): bump librenms to ${{ steps.semver.outputs.version }}"
-          git push
+          All notable changes to the LibreNMS Helm Chart will be documented in this file.
+
+          The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+          and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+          ## [Unreleased]
+
+          ### Added
+          - 
+
+          ### Changed
+          - 
+
+          ### Deprecated
+          - 
+
+          ### Removed
+          - 
+
+          ### Fixed
+          - 
+
+          ### Security
+          - 
+
+          TEMPLATE
+            
+            # Append the cut version section
+            cat >> "$TEMP_FILE" << EOF
+          ## [$VERSION] - $RELEASE_DATE
+
+          TEMPLATE
+            
+            echo "$UNRELEASED_CONTENT" >> "$TEMP_FILE"
+            
+            # Append the rest of the old changelog (everything after [Unreleased])
+            awk '/^## \[Unreleased\]/,/^## \[/{if (/^## \[/ && !/\[Unreleased\]/) {found=1}} found' CHANGELOG.md >> "$TEMP_FILE"
+            
+            # Extract just the change content for release notes (without the version header)
+            echo "$UNRELEASED_CONTENT" > .cr-release-notes.md
+            
+            # Replace original changelog
+            mv "$TEMP_FILE" CHANGELOG.md
+            
+            # Update Chart.yaml
+            yq -i '.version = "'$VERSION'"' charts/librenms/Chart.yaml
+            
+            # Commit both files
+            git add CHANGELOG.md charts/librenms/Chart.yaml
+            git commit -m "chore(release): cut version $VERSION"
+            git push
+            
+            echo "changelog_file=.cr-release-notes.md" >> $GITHUB_OUTPUT
+            
+            echo "Release notes:"
+            cat .cr-release-notes.md
+          else
+            echo "⚠ CHANGELOG.md not found"
+            echo "Release $VERSION" > .cr-release-notes.md
+            echo "changelog_file=.cr-release-notes.md" >> $GITHUB_OUTPUT
+          fi
 
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.7.0
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          CR_RELEASE_NOTES_FILE: "${{ steps.changelog.outputs.changelog_file }}"
 
       # see https://github.com/helm/chart-releaser/issues/183
       - name: Login to GitHub Container Registry
