@@ -45,6 +45,14 @@ jobs:
           sudo chmod +x /usr/local/bin/yq
           yq --version
 
+      - name: Install helm-docs
+        if: steps.semver.outputs.changed == 'true'
+        run: |
+          HELM_DOCS_VERSION=v1.14.2
+          curl -sSL https://github.com/norwoodj/helm-docs/releases/download/${HELM_DOCS_VERSION}/helm-docs_${HELM_DOCS_VERSION#v}_Linux_x86_64.tar.gz -o /tmp/helm-docs.tar.gz
+          tar -xzf /tmp/helm-docs.tar.gz -C /usr/local/bin helm-docs
+          helm-docs --version
+
       - name: Extract and cut changelog for release
         if: steps.semver.outputs.changed == 'true'
         id: changelog
@@ -112,8 +120,11 @@ jobs:
             # Update Chart.yaml
             yq -i '.version = "'$VERSION'"' charts/librenms/Chart.yaml
             
+            # Regenerate chart README from template
+            helm-docs -c charts/librenms
+            
             # Commit both files
-            git add CHANGELOG.md charts/librenms/Chart.yaml
+            git add CHANGELOG.md charts/librenms/Chart.yaml charts/librenms/README.md
             git commit -m "chore(release): cut version $VERSION"
             git push
             
