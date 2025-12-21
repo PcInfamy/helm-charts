@@ -22,6 +22,12 @@ helm install my-release librenms/<chart-name>
 
 Replace `<chart-name>` with the name of the chart you wish to install (e.g., `librenms`).
 
+## Changelog
+
+All notable changes to the LibreNMS Helm Chart are documented in [CHANGELOG.md](CHANGELOG.md). The changelog follows the [Keep a Changelog](https://keepachangelog.com/) format and this project adheres to [Semantic Versioning](https://semver.org/).
+
+For the complete changelog including upgrade notes and older versions, see [CHANGELOG.md](CHANGELOG.md) or view [Releases on GitHub](https://github.com/librenms/helm-charts/releases).
+
 ## Contributing
 
 We welcome contributions from the community. If you have improvements or fixes, please submit a pull request. Make sure to follow our contribution guidelines.
