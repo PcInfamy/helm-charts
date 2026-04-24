@@ -40,6 +40,10 @@ spec:
             env:
             - name: DB_PASSWORD
               {{- include "librenms.dbPasswordEnv" . | nindent 14 }}
+            {{- if include "librenms.redisAuthEnabled" . }}
+            - name: REDIS_PASSWORD
+              {{- include "librenms.redisPasswordEnv" . | nindent 14 }}
+            {{- end }}
             {{- with .Values.librenms.extraEnvs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

@@ -141,6 +141,83 @@ externalDatabase:
 - MySQL server configured with `character-set-server=utf8mb4` and `collation-server=utf8mb4_unicode_ci`
   (see [LibreNMS collation docs](https://community.librenms.org/t/new-default-database-charset-collation/14956))
 
+## Redis Configuration
+
+### Internal Redis (Default)
+
+By default, the chart deploys [HelmForge Redis](https://github.com/helmforgedev/charts/tree/main/charts/redis) as part of the release (`redis.enabled: true`).
+Redis is used for caching and session storage. Authentication is disabled by default.
+
+To enable Redis authentication:
+
+```yaml
+redis:
+  auth:
+    enabled: true
+    # password: "your-password"  # auto-generated if omitted
+```
+
+### Migrating from Bitnami Redis (chart versions < 8.0.0)
+
+Chart v8.0.0 replaced the Bitnami Redis subchart with [HelmForge Redis](https://github.com/helmforgedev/charts/tree/main/charts/redis). Key differences:
+
+| | Bitnami | HelmForge |
+|---|---|---|
+| Service name | `RELEASE-redis-master` | `RELEASE-redis-client` |
+| Auth default | disabled | disabled (configurable) |
+| Image | `bitnamilegacy/redis` | `docker.io/library/redis` |
+| Values keys | `master.disableCommands`, `sentinel.*` | `standalone.*`, `auth.*` |
+
+Since Redis is used only for caching and sessions (no persistent data that needs migration), the upgrade is straightforward:
+
+1. **Upgrade the chart** — Redis will be recreated with the new HelmForge chart. Cached data and sessions will be reset (users may need to log in again).
+2. **Remove Bitnami workarounds** — Delete `global.security.allowInsecureImages` and `redis.image.repository: bitnamilegacy/redis` from your values.
+3. **Update any custom Redis values** — Replace Bitnami-specific keys (`master.*`, `sentinel.*`) with HelmForge equivalents (`standalone.*`, `auth.*`).
+
+### External Redis
+
+To use an external Redis instance, disable the bundled Redis subchart and configure `externalRedis`:
+
+```yaml
+redis:
+  enabled: false
+
+externalRedis:
+  host: redis.example.com
+  port: 6379
+  db: 0
+  password: "your-password"         # or use existingSecret
+  # existingSecret:
+  #   name: my-redis-secret          # reference to existing K8s secret
+  #   key: redis-password            # key in the secret containing the password
+```
+
+**Example with existing Kubernetes secret:**
+
+```bash
+# Create a secret with the Redis password
+kubectl create secret generic redis-credentials \
+  --from-literal=redis-password=your-password \
+  -n default
+```
+
+Then in your values:
+
+```yaml
+redis:
+  enabled: false
+
+externalRedis:
+  host: redis.example.com
+  port: 6379
+  db: 0
+  existingSecret:
+    name: redis-credentials
+    key: redis-password
+```
+
+**Note:** If your external Redis does not require authentication, simply omit the `password` and `existingSecret` fields.
+
 ## Persistence
 
 RRDCached uses persistent storage for time-series database files. Two separate PersistentVolumeClaims are configured:
