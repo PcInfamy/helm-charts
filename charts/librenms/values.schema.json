@@ -138,19 +138,6 @@
     "global": {
       "type": "object",
       "description": "Global Helm chart values",
-      "properties": {
-        "security": {
-          "type": "object",
-          "properties": {
-            "allowInsecureImages": {
-              "type": "boolean",
-              "description": "Allow use of images from bitnamilegacy repository (required for Redis subchart)",
-              "default": true
-            }
-          },
-          "additionalProperties": false
-        }
-      },
       "additionalProperties": true
     },
     "librenms": {
@@ -671,6 +658,89 @@
               "maxProperties": 0
             }
           ]
+        }
+      }
+    },
+    "redis": {
+      "type": "object",
+      "description": "Configuration for Redis dependency chart by HelmForge (https://github.com/helmforgedev/charts/tree/main/charts/redis). Additional properties are passed through to the subchart.",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable bundled Redis subchart. Set to false to use externalRedis instead.",
+          "default": true
+        },
+        "architecture": {
+          "type": "string",
+          "description": "Redis architecture: standalone, replication, sentinel, or cluster",
+          "enum": ["standalone", "replication", "sentinel", "cluster"],
+          "default": "standalone"
+        },
+        "auth": {
+          "type": "object",
+          "description": "Redis authentication configuration",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable Redis password authentication",
+              "default": false
+            },
+            "password": {
+              "type": "string",
+              "description": "Redis password. Auto-generated if empty and auth.enabled=true"
+            },
+            "existingSecret": {
+              "type": "string",
+              "description": "Name of existing secret containing Redis password"
+            },
+            "existingSecretPasswordKey": {
+              "type": "string",
+              "description": "Key in the existing secret containing the Redis password",
+              "default": "redis-password"
+            }
+          }
+        }
+      }
+    },
+    "externalRedis": {
+      "type": "object",
+      "description": "External Redis configuration. Used when redis.enabled is false.",
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Redis host (DNS name or IP address)"
+        },
+        "port": {
+          "type": "integer",
+          "description": "Redis port",
+          "default": 6379
+        },
+        "db": {
+          "type": "integer",
+          "description": "Redis database number",
+          "default": 0
+        },
+        "existingSecret": {
+          "type": "object",
+          "description": "Reference to existing secret containing Redis password",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name of the secret"
+            },
+            "key": {
+              "type": "string",
+              "description": "Key in the secret containing the password",
+              "default": "redis-password"
+            }
+          }
+        },
+        "password": {
+          "type": "string",
+          "description": "Redis password (plain text, not recommended for production)"
         }
       }
     }

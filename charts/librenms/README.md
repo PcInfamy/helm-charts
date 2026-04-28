@@ -1,6 +1,6 @@
 # librenms
 
-![Version: 7.5.0](https://img.shields.io/badge/Version-7.5.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 26.4.1](https://img.shields.io/badge/AppVersion-26.4.1-informational?style=flat-square)
+![Version: 7.4.0](https://img.shields.io/badge/Version-7.4.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 26.4.1](https://img.shields.io/badge/AppVersion-26.4.1-informational?style=flat-square)
 
 LibreNMS is an autodiscovering PHP/MySQL-based network monitoring system.
 
@@ -29,8 +29,64 @@ $ helm install my-release librenms/librenms
 
 ### Internal Database (Default)
 
-By default, the chart deploys MySQL as part of the release (`mysql.enabled: true`).
+By default, the chart deploys [HelmForge MySQL](https://github.com/helmforgedev/charts/tree/main/charts/mysql) as part of the release (`mysql.enabled: true`).
 No additional database configuration is needed.
+
+The chart sets `collation-server=utf8mb4_unicode_ci` by default, which satisfies the
+[LibreNMS database collation requirement](https://community.librenms.org/t/new-default-database-charset-collation/14956)
+automatically on fresh installs.
+
+### Migrating from Bitnami MySQL (chart versions < 8.0.0)
+
+Chart v8.0.0 replaced the Bitnami MySQL subchart with [HelmForge MySQL](https://github.com/helmforgedev/charts/tree/main/charts/mysql). The two charts use **different data-directory layouts** on disk (Bitnami: `/bitnami/mysql`, HelmForge: `/var/lib/mysql`), so a **backup and restore is required** even though the PVC name (`data-RELEASE-mysql-0`) is unchanged.
+
+> **Note:** Replace `RELEASE` and `NAMESPACE` below with your Helm release name and Kubernetes namespace.
+
+**Step 1: Back up your database**
+
+```bash
+kubectl exec -n NAMESPACE RELEASE-mysql-0 -- mysqldump -uroot \
+  -p"$(kubectl get secret RELEASE-mysql -n NAMESPACE -o jsonpath='{.data.mysql-root-password}' | base64 -d)" \
+  --all-databases > backup.sql
+```
+
+**Step 2: Delete the old MySQL StatefulSet and its PVC**
+
+```bash
+kubectl delete statefulset RELEASE-mysql -n NAMESPACE --cascade=orphan
+kubectl delete pod RELEASE-mysql-0 -n NAMESPACE
+kubectl delete pvc data-RELEASE-mysql-0 -n NAMESPACE
+```
+
+**Step 3: Upgrade the chart**
+
+Point LibreNMS at the old Bitnami secret during the first upgrade so it can connect while HelmForge MySQL initializes:
+
+```yaml
+mysql:
+  existingAuthSecret:
+    name: RELEASE-mysql        # old Bitnami secret name
+    key: mysql-password        # old Bitnami secret key
+```
+
+```bash
+helm upgrade RELEASE ./charts/librenms -f values.yaml
+```
+
+**Step 4: Restore the backup**
+
+> **Note:** After upgrading, the HelmForge chart creates a new secret named `RELEASE-mysql-auth` (replacing the old Bitnami `RELEASE-mysql` secret).
+
+```bash
+kubectl cp backup.sql NAMESPACE/RELEASE-mysql-0:/tmp/backup.sql
+kubectl exec -n NAMESPACE RELEASE-mysql-0 -- mysql -uroot \
+  -p"$(kubectl get secret RELEASE-mysql-auth -n NAMESPACE -o jsonpath='{.data.mysql-root-password}' | base64 -d)" \
+  -e "SOURCE /tmp/backup.sql;"
+```
+
+**Step 5: Once verified, remove the `existingAuthSecret` override**
+
+After confirming everything works, remove the `mysql.existingAuthSecret` block from your values and run `helm upgrade` again. The chart will use the new HelmForge-generated secret going forward.
 
 ### External Database
 
@@ -52,7 +108,7 @@ externalDatabase:
   timeout: 60                        # database connection timeout in seconds
 ```
 
-**Note:** You can specify the port in either the `host` field (`mysql.example.com:3306`) OR the `port` field, but not both required.
+**Note:** You can specify the port in either the `host` field (`mysql.example.com:3306`) OR the `port` field, but not both.
 
 **Example with existing Kubernetes secret:**
 
@@ -80,10 +136,88 @@ externalDatabase:
 ```
 
 **Pre-requisites for external database:**
-- MySQL 5.7+ or MariaDB 10.2+
+- MySQL 8.0+ or MariaDB 10.5+
 - Database user with CREATE, ALTER, DROP, INSERT, UPDATE, DELETE privileges
 - Network connectivity from cluster to database host
-- Pre-created database (ensure `CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
+- MySQL server configured with `character-set-server=utf8mb4` and `collation-server=utf8mb4_unicode_ci`
+  (see [LibreNMS collation docs](https://community.librenms.org/t/new-default-database-charset-collation/14956))
+
+## Redis Configuration
+
+### Internal Redis (Default)
+
+By default, the chart deploys [HelmForge Redis](https://github.com/helmforgedev/charts/tree/main/charts/redis) as part of the release (`redis.enabled: true`).
+Redis is used for caching and session storage. Authentication is disabled by default.
+
+To enable Redis authentication:
+
+```yaml
+redis:
+  auth:
+    enabled: true
+    # password: "your-password"  # auto-generated if omitted
+```
+
+### Migrating from Bitnami Redis (chart versions < 8.0.0)
+
+Chart v8.0.0 replaced the Bitnami Redis subchart with [HelmForge Redis](https://github.com/helmforgedev/charts/tree/main/charts/redis). Key differences:
+
+| | Bitnami | HelmForge |
+|---|---|---|
+| Service name | `RELEASE-redis-master` | `RELEASE-redis-client` |
+| Auth default | disabled | disabled (configurable) |
+| Image | `bitnamilegacy/redis` | `docker.io/library/redis` |
+| Values keys | `master.disableCommands`, `sentinel.*` | `standalone.*`, `auth.*` |
+
+Since Redis is used only for caching and sessions (no persistent data that needs migration), the upgrade is straightforward:
+
+1. **Upgrade the chart** — Redis will be recreated with the new HelmForge chart. Cached data and sessions will be reset (users may need to log in again).
+2. **Remove Bitnami workarounds** — Delete `global.security.allowInsecureImages` and `redis.image.repository: bitnamilegacy/redis` from your values.
+3. **Update any custom Redis values** — Replace Bitnami-specific keys (`master.*`, `sentinel.*`) with HelmForge equivalents (`standalone.*`, `auth.*`).
+
+### External Redis
+
+To use an external Redis instance, disable the bundled Redis subchart and configure `externalRedis`:
+
+```yaml
+redis:
+  enabled: false
+
+externalRedis:
+  host: redis.example.com
+  port: 6379
+  db: 0
+  password: "your-password"         # or use existingSecret
+  # existingSecret:
+  #   name: my-redis-secret          # reference to existing K8s secret
+  #   key: redis-password            # key in the secret containing the password
+```
+
+**Example with existing Kubernetes secret:**
+
+```bash
+# Create a secret with the Redis password
+kubectl create secret generic redis-credentials \
+  --from-literal=redis-password=your-password \
+  -n default
+```
+
+Then in your values:
+
+```yaml
+redis:
+  enabled: false
+
+externalRedis:
+  host: redis.example.com
+  port: 6379
+  db: 0
+  existingSecret:
+    name: redis-credentials
+    key: redis-password
+```
+
+**Note:** If your external Redis does not require authentication, simply omit the `password` and `existingSecret` fields.
 
 ## Persistence
 
@@ -158,7 +292,7 @@ librenms:
 
 ### Available values
 
-The following table lists the main configurable parameters of the librenms chart v7.5.0 and their default values. Please, refer to [values.yaml](./values.yaml) for the full list of configurable parameters.
+The following table lists the main configurable parameters of the librenms chart v7.4.0 and their default values. Please, refer to [values.yaml](./values.yaml) for the full list of configurable parameters.
 
 ## Values
 
@@ -174,7 +308,14 @@ The following table lists the main configurable parameters of the librenms chart
 | externalDatabase.port | int | `3306` | DB port (MySQL default 3306). Optional if port is included in the host field. |
 | externalDatabase.timeout | int | `60` | Optional: DB connection timeout in seconds |
 | externalDatabase.user | string | `"librenms"` | Database username |
-| global.security.allowInsecureImages | bool | `true` |  |
+| externalRedis | object | `{"db":0,"existingSecret":{"key":"redis-password","name":""},"host":"","password":"","port":6379}` | External Redis configuration. Used when redis.enabled is false. When redis.enabled is true (default), the bundled Redis subchart is used and these values are ignored. |
+| externalRedis.db | int | `0` | Redis database number |
+| externalRedis.existingSecret | object | `{"key":"redis-password","name":""}` | Where to get the Redis password: Option A: reference an existing Secret (recommended for production) |
+| externalRedis.existingSecret.key | string | `"redis-password"` | Key in the secret that contains the Redis password |
+| externalRedis.existingSecret.name | string | `""` | Name of the secret containing the Redis password |
+| externalRedis.host | string | `""` | Redis host (DNS name or IP) |
+| externalRedis.password | string | `""` | Redis password (plain text). Use existingSecret instead for production. |
+| externalRedis.port | int | `6379` | Redis port (default 6379) |
 | ingress | object | `{"annotations":{},"className":"","enabled":false,"hosts":[{"host":"chart-example.local","paths":[{"path":"/","pathType":"ImplementationSpecific"}]}],"tls":[]}` | LibreNMS ingress configuration |
 | ingress.annotations | object | `{}` | Ingress annotations |
 | ingress.className | string | `""` | Ingress class name |
@@ -243,8 +384,10 @@ The following table lists the main configurable parameters of the librenms chart
 | librenms.snmp_scanner.resources | object | `{}` | resources defines the computing resources (CPU and memory) that are allocated to the containers running within the Pod. |
 | librenms.snmp_scanner.securityContext | object | `{"fsGroup":1000,"runAsGroup":1000,"runAsNonRoot":true,"runAsUser":1000}` | securityContext defines the security settings for the SNMP scanner pod. These settings are required for the SNMP scanner to run properly. See: https://github.com/librenms/docker/pull/530 |
 | librenms.timezone | string | `"UTC"` | Timezone used by librenms for communication with RRD cached |
-| mysql | object | `{"auth":{"database":"librenms","username":"librenms"},"enabled":true,"image":{"repository":"bitnamilegacy/mysql"}}` | Configuration for MySQL dependency chart by Bitnami. See their chart for more information: https://github.com/bitnami/charts/tree/master/bitnami/mysql |
-| redis | object | `{"architecture":"standalone","auth":{"enabled":false,"sentinel":false},"enabled":true,"image":{"repository":"bitnamilegacy/redis"},"master":{"disableCommands":[]},"sentinel":{"enabled":false}}` | Configuration for redis dependency chart by Bitnami. See their chart for more information: https://github.com/bitnami/charts/tree/master/bitnami/redis |
+| mysql | object | `{"architecture":"standalone","auth":{"database":"librenms","username":"librenms"},"config":{"myCnf":"[mysqld]\ncharacter-set-server=utf8mb4\ncollation-server=utf8mb4_unicode_ci\n"},"enabled":true,"existingAuthSecret":{},"standalone":{"persistence":{"enabled":true,"size":"8Gi"}}}` | Configuration for MySQL dependency chart by HelmForge. See their chart for more information: https://github.com/helmforgedev/charts/tree/main/charts/mysql |
+| mysql.config | object | `{"myCnf":"[mysqld]\ncharacter-set-server=utf8mb4\ncollation-server=utf8mb4_unicode_ci\n"}` | Set the default collation to utf8mb4_unicode_ci, which is required by LibreNMS. MySQL 8.4 defaults to utf8mb4_0900_ai_ci, which causes validation warnings. See: https://community.librenms.org/t/new-default-database-charset-collation/14956 |
+| mysql.existingAuthSecret | object | `{}` | Use an existing secret for MySQL authentication instead of the auto-generated one. This is useful when migrating from the Bitnami MySQL subchart, which created a secret named "RELEASE-mysql" with key "mysql-password". Example for Bitnami migration:   existingAuthSecret:     name: my-release-mysql     key: mysql-password |
+| redis | object | `{"architecture":"standalone","auth":{"enabled":false},"enabled":true,"standalone":{"persistence":{"enabled":false}}}` | Configuration for Redis dependency chart by HelmForge. See their chart for more information: https://github.com/helmforgedev/charts/tree/main/charts/redis  Migrating from Bitnami Redis (chart versions < 8.0.0):   Redis is used only for caching and sessions, so no data migration is needed.   The service name changes from "RELEASE-redis-master" to "RELEASE-redis-client".   Remove Bitnami-specific values (image.repository, master.*, sentinel.*) and   replace with HelmForge equivalents (standalone.*, auth.*).   If you had Redis auth enabled with a Bitnami-generated secret, point to it:     auth:       enabled: true       existingSecret: my-release-redis   # old Bitnami secret name |
 
 ## Uninstalling the Chart
 
@@ -258,8 +401,8 @@ $ helm delete my-release
 
 | Repository | Name | Version |
 |------------|------|---------|
-| https://charts.bitnami.com/bitnami | mysql | ~14.0.0 |
-| https://charts.bitnami.com/bitnami | redis | 24.0.0 |
+| https://repo.helmforge.dev | mysql | ~1.8.0 |
+| https://repo.helmforge.dev | redis | ~1.6.0 |
 
 ## Maintainers
 

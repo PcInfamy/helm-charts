@@ -2,10 +2,6 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-# Allow use of images from bitnamilegacy repository (required for Redis subchart)
-global:
-  security:
-    allowInsecureImages: true
 
 librenms:
   image:
@@ -319,20 +315,45 @@ externalDatabase:
   # -- Optional: DB connection timeout in seconds
   timeout: 60
 
-# -- Configuration for redis dependency chart by Bitnami. See their chart for
-# more information: https://github.com/bitnami/charts/tree/master/bitnami/redis
+# -- Configuration for Redis dependency chart by HelmForge. See their chart for
+# more information: https://github.com/helmforgedev/charts/tree/main/charts/redis
+#
+# Migrating from Bitnami Redis (chart versions < 8.0.0):
+#   Redis is used only for caching and sessions, so no data migration is needed.
+#   The service name changes from "RELEASE-redis-master" to "RELEASE-redis-client".
+#   Remove Bitnami-specific values (image.repository, master.*, sentinel.*) and
+#   replace with HelmForge equivalents (standalone.*, auth.*).
+#   If you had Redis auth enabled with a Bitnami-generated secret, point to it:
+#     auth:
+#       enabled: true
+#       existingSecret: my-release-redis   # old Bitnami secret name
 redis:
   enabled: true
-  # Work around for Bitnami dropping support
-  # https://github.com/bitnami/charts/issues/35164
-  # https://github.com/bitnami/charts/issues/35256
-  image:
-    repository: bitnamilegacy/redis
+  architecture: standalone
   auth:
     enabled: false
-    sentinel: false
-  sentinel:
-    enabled: false
-  master:
-    disableCommands: []
-  architecture: standalone
+  standalone:
+    persistence:
+      enabled: false
+
+# -- External Redis configuration. Used when redis.enabled is false.
+# When redis.enabled is true (default), the bundled Redis subchart is used and these values are ignored.
+externalRedis:
+  # -- Redis host (DNS name or IP)
+  host: ""
+  # -- Redis port (default 6379)
+  port: 6379
+  # -- Redis database number
+  db: 0
+
+  # -- Where to get the Redis password:
+  # Option A: reference an existing Secret (recommended for production)
+  existingSecret:
+    # -- Name of the secret containing the Redis password
+    name: ""
+    # -- Key in the secret that contains the Redis password
+    key: "redis-password"
+
+  # Option B: literal password (not recommended for production, but useful for testing)
+  # -- Redis password (plain text). Use existingSecret instead for production.
+  password: ""

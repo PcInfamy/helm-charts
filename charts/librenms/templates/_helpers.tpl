@@ -173,6 +173,93 @@ valueFrom:
 {{- end -}}
 
 {{/*
+Redis host - returns the Redis host based on mode
+*/}}
+{{- define "librenms.redisHost" -}}
+{{- if not .Values.redis.enabled -}}
+{{- required "externalRedis.host is required when redis.enabled is false" .Values.externalRedis.host -}}
+{{- else -}}
+{{- printf "%s-redis-client" .Release.Name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Redis port - returns the Redis port based on mode
+*/}}
+{{- define "librenms.redisPort" -}}
+{{- if not .Values.redis.enabled -}}
+{{- .Values.externalRedis.port | default 6379 -}}
+{{- else -}}
+{{- print "6379" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Redis database number - returns the Redis DB index based on mode
+*/}}
+{{- define "librenms.redisDb" -}}
+{{- if not .Values.redis.enabled -}}
+{{- .Values.externalRedis.db | default 0 -}}
+{{- else -}}
+{{- print "0" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Redis auth enabled - returns true if Redis password auth should be configured
+*/}}
+{{- define "librenms.redisAuthEnabled" -}}
+{{- if not .Values.redis.enabled -}}
+{{- if or .Values.externalRedis.password .Values.externalRedis.existingSecret.name -}}
+true
+{{- end -}}
+{{- else -}}
+{{- if .Values.redis.auth.enabled -}}
+true
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Redis password environment variable - returns the env var definition for REDIS_PASSWORD
+*/}}
+{{- define "librenms.redisPasswordEnv" -}}
+{{- if not .Values.redis.enabled -}}
+{{- if .Values.externalRedis.existingSecret.name -}}
+valueFrom:
+  secretKeyRef:
+    name: {{ .Values.externalRedis.existingSecret.name }}
+    key: {{ .Values.externalRedis.existingSecret.key | default "redis-password" }}
+{{- else if .Values.externalRedis.password -}}
+value: {{ .Values.externalRedis.password | quote }}
+{{- end -}}
+{{- else -}}
+{{- if .Values.redis.auth.existingSecret -}}
+valueFrom:
+  secretKeyRef:
+    name: {{ .Values.redis.auth.existingSecret }}
+    key: {{ .Values.redis.auth.existingSecretPasswordKey | default "redis-password" }}
+{{- else -}}
+valueFrom:
+  secretKeyRef:
+    name: {{ .Release.Name }}-redis-auth
+    key: redis-password
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Validate external Redis configuration
+*/}}
+{{- define "librenms.validateExternalRedis" -}}
+{{- if not .Values.redis.enabled -}}
+{{- if not .Values.externalRedis.host -}}
+{{- fail "externalRedis.host is required when redis.enabled is false" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Validate external database configuration
 */}}
 {{- define "librenms.validateExternalDB" -}}
