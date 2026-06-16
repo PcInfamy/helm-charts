@@ -1,0 +1,101 @@
+name: Changelog Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v45
+        with:
+          files: |
+            charts/*/Chart.yaml
+            CHANGELOG.md
+
+      - name: Check changelog updated when chart changes
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          CHART_CHANGED=false
+          CHANGELOG_CHANGED=false
+          
+          # Check if any Chart.yaml files changed
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ "$file" == *"Chart.yaml" ]]; then
+              CHART_CHANGED=true
+              break
+            fi
+          done
+          
+          # Check if CHANGELOG.md changed
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ "$file" == "CHANGELOG.md" ]]; then
+              CHANGELOG_CHANGED=true
+              break
+            fi
+          done
+          
+          if [ "$CHART_CHANGED" = true ] && [ "$CHANGELOG_CHANGED" = false ]; then
+            echo "⚠ Chart.yaml has changed, but CHANGELOG.md was not updated"
+            echo ""
+            echo "❌ VALIDATION FAILED"
+            echo ""
+            echo "When you update the chart, you must also update the [Unreleased] section of CHANGELOG.md"
+            echo ""
+            echo "Example:"
+            echo "## [Unreleased]"
+            echo ""
+            echo "### Changed"
+            echo "- Updated resource configuration"
+            echo ""
+            echo "### Added"
+            echo "- New feature X"
+            echo ""
+            echo "See CHANGELOG.md and https://keepachangelog.com/ for format guidelines."
+            exit 1
+          fi
+          
+          if [ "$CHANGELOG_CHANGED" = true ]; then
+            echo "✓ CHANGELOG.md updated"
+          fi
+          
+          if [ "$CHART_CHANGED" = false ] && [ "$CHANGELOG_CHANGED" = false ]; then
+            echo "ℹ No chart or changelog changes detected"
+          fi
+
+      - name: Validate CHANGELOG format
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          if [ -f "CHANGELOG.md" ]; then
+            echo "Validating CHANGELOG.md format..."
+            
+            # Check for required headers
+            if ! grep -q "# Changelog" CHANGELOG.md; then
+              echo "✗ ERROR: CHANGELOG.md missing main '# Changelog' header"
+              exit 1
+            fi
+            
+            if ! grep -q "## \[Unreleased\]" CHANGELOG.md; then
+              echo "✗ ERROR: CHANGELOG.md must have [Unreleased] section"
+              exit 1
+            fi
+            
+            if ! grep -q "Keep a Changelog" CHANGELOG.md; then
+              echo "⚠ WARNING: CHANGELOG.md should reference Keep a Changelog format"
+            fi
+            
+            if ! grep -q "Semantic Versioning" CHANGELOG.md; then
+              echo "⚠ WARNING: CHANGELOG.md should reference Semantic Versioning"
+            fi
+            
+            echo "✓ CHANGELOG.md format looks good"
+          fi
